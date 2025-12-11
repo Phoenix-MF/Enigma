@@ -162,4 +162,201 @@
 
     <div class="lampboard" id="lampboard"></div>
 
-    <div class="keyboard"
+    <div class="keyboard" id="keyboard"></div>
+
+    <div class="output-area">
+        <h4>RESULT:</h4>
+        <div id="log-text"></div>
+    </div>
+
+<script>
+    // --- ヘルパー関数: 安全な剰余計算 ---
+    function safeMod(n, m) {
+        return ((n % m) + m) % m;
+    }
+
+    // --- エニグマ クラス定義 ---
+    class Enigma {
+        constructor(r1, r2, r3) {
+            this.rotors = [
+                "EKMFLGDQVZNTOWYHXUSPAIBRCJ", // I
+                "AJDKSIRUXBLHWTMCQGZNPYFVOE", // II
+                "BDFHJLCPRTXVZNYEIWGAKMUSQO"  // III
+            ];
+            this.reflector = "YRUHQSLDPXNGOKMIEBFZCWVJAT"; // Reflector B
+            this.positions = [r1, r2, r3];
+        }
+
+        encrypt(char) {
+            const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            let n = alphabet.indexOf(char);
+            if (n === -1) return null;
+
+            this.rotateRotors();
+
+            // 往路
+            for (let i = 2; i >= 0; i--) n = this.rotorForward(n, i);
+            
+            // 反転
+            n = alphabet.indexOf(this.reflector[n]);
+            
+            // 復路
+            for (let i = 0; i < 3; i++) n = this.rotorBackward(n, i);
+
+            return alphabet[n];
+        }
+
+        rotateRotors() {
+            this.positions[2] = safeMod(this.positions[2] + 1, 26);
+            if (this.positions[2] === 0) {
+                this.positions[1] = safeMod(this.positions[1] + 1, 26);
+                if (this.positions[1] === 0) {
+                    this.positions[0] = safeMod(this.positions[0] + 1, 26);
+                }
+            }
+        }
+
+        rotorForward(n, idx) {
+            const wiring = this.rotors[idx];
+            const offset = this.positions[idx];
+            const inputPin = safeMod(n + offset, 26);
+            const mappedChar = wiring[inputPin];
+            const outputPin = safeMod(mappedChar.charCodeAt(0) - 65 - offset, 26);
+            return outputPin;
+        }
+
+        rotorBackward(n, idx) {
+            const wiring = this.rotors[idx];
+            const offset = this.positions[idx];
+            const targetInput = safeMod(n + offset, 26);
+            const targetChar = String.fromCharCode(targetInput + 65);
+            const mappedIdx = wiring.indexOf(targetChar);
+            const outputPin = safeMod(mappedIdx - offset, 26);
+            return outputPin;
+        }
+    }
+
+    // --- アプリケーション制御 ---
+    const keysLayout = [
+        "Q","W","E","R","T","Y","U","I","O","P",
+        "A","S","D","F","G","H","J","K","L",
+        "Z","X","C","V","B","N","M"
+    ];
+    
+    let machine;
+
+    window.onload = function() {
+        initUI();
+        resetMachine();
+        
+        // ★追加: PCのキーボードイベントを監視
+        document.addEventListener('keydown', handlePhysicalKey);
+    };
+
+    function initUI() {
+        const lampboard = document.getElementById('lampboard');
+        const keyboard = document.getElementById('keyboard');
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+        // 設定セレクトボックス生成
+        ['rotor1', 'rotor2', 'rotor3'].forEach(id => {
+            const sel = document.getElementById(id);
+            for(let i=0; i<26; i++) {
+                let opt = document.createElement('option');
+                opt.value = i;
+                opt.text = alphabet[i];
+                sel.appendChild(opt);
+            }
+            sel.addEventListener('change', updateMachineFromUI);
+        });
+
+        // キーとランプ生成
+        keysLayout.forEach(char => {
+            // ランプ
+            let lamp = document.createElement('div');
+            lamp.className = 'lamp';
+            lamp.id = 'lamp-' + char;
+            lamp.innerText = char;
+            lampboard.appendChild(lamp);
+
+            // キー
+            let keyBtn = document.createElement('button');
+            keyBtn.className = 'key';
+            keyBtn.innerText = char;
+            keyBtn.id = 'key-' + char; // ★キーボード連動用にIDを追加
+            
+            // マウス/タッチ操作
+            keyBtn.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                handleInput(char);
+            });
+
+            keyboard.appendChild(keyBtn);
+        });
+    }
+
+    // ★追加: PCキーボードが押されたときの処理
+    function handlePhysicalKey(e) {
+        const char = e.key.toUpperCase();
+        
+        // 配列に含まれる文字（A-Z）のみ反応する
+        if (keysLayout.includes(char)) {
+            // 画面上のキーを視覚的に「押した状態」にする
+            const btn = document.getElementById('key-' + char);
+            if(btn) {
+                btn.classList.add('pressed');
+                setTimeout(() => btn.classList.remove('pressed'), 100);
+            }
+            
+            // 入力処理を実行
+            handleInput(char);
+        }
+    }
+
+    function updateMachineFromUI() {
+        const r1 = parseInt(document.getElementById('rotor1').value);
+        const r2 = parseInt(document.getElementById('rotor2').value);
+        const r3 = parseInt(document.getElementById('rotor3').value);
+        machine = new Enigma(r1, r2, r3);
+        updateDisplay();
+    }
+
+    function resetMachine() {
+        document.getElementById('rotor1').value = 0;
+        document.getElementById('rotor2').value = 0;
+        document.getElementById('rotor3').value = 0;
+        document.getElementById('log-text').innerText = "";
+        updateMachineFromUI();
+    }
+
+    function handleInput(char) {
+        if (!machine) return;
+
+        const result = machine.encrypt(char);
+
+        // ランプのアニメーション
+        const lamp = document.getElementById('lamp-' + result);
+        lamp.classList.remove('active');
+        void lamp.offsetWidth; // リフロー強制
+        lamp.classList.add('active');
+
+        setTimeout(() => {
+            lamp.classList.remove('active');
+        }, 800);
+
+        updateDisplay();
+        
+        const log = document.getElementById('log-text');
+        log.innerText += result;
+    }
+
+    function updateDisplay() {
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        const p = machine.positions;
+        document.getElementById('current-pos').innerText = 
+            `${alphabet[p[0]]} ${alphabet[p[1]]} ${alphabet[p[2]]}`;
+    }
+
+</script>
+</body>
+</html>
